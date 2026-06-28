@@ -44,8 +44,8 @@ type DashboardState = {
 
 const app = document.querySelector<HTMLDivElement>('#app');
 const prometheus = new PrometheusClient();
-const grafanaUrl = import.meta.env.VITE_GRAFANA_URL || 'http://localhost:3007';
-const prometheusUrl = import.meta.env.VITE_PROMETHEUS_URL || 'http://localhost:9090';
+const grafanaUrl = import.meta.env.VITE_GRAFANA_URL || '/grafana/';
+const prometheusUrl = import.meta.env.VITE_PROMETHEUS_URL || '/api/prometheus/query?query=up';
 
 let state: DashboardState = {
   services: coreServices.map((service) => emptyServiceState(service)),
