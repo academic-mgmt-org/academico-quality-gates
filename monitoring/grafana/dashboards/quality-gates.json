@@ -62,8 +62,8 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 24,
+        "h": 7,
+        "w": 6,
         "x": 0,
         "y": 0
       },
@@ -72,7 +72,7 @@
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
-        "orientation": "horizontal",
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -92,14 +92,13 @@
             "uid": "Prometheus"
           },
           "editorMode": "code",
-          "expr": "academico_quality_gate_score == 1",
-          "instant": false,
-          "legendFormat": "{{service}}",
+          "expr": "academico_quality_gate_required_pass{service=\"academico-login\"}",
+          "legendFormat": "required",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Gate aprobado por servicio",
+      "title": "Gates requeridos",
       "type": "stat"
     },
     {
@@ -109,6 +108,8 @@
       },
       "fieldConfig": {
         "defaults": {
+          "max": 1,
+          "min": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -118,7 +119,7 @@
               },
               {
                 "color": "orange",
-                "value": 0.75
+                "value": 0.8
               },
               {
                 "color": "green",
@@ -131,19 +132,14 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 8
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 0
       },
       "id": 2,
       "options": {
-        "displayMode": "gradient",
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "auto",
-        "orientation": "horizontal",
+        "orientation": "auto",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -151,9 +147,9 @@
           "fields": "",
           "values": false
         },
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color"
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
       },
       "pluginVersion": "11.4.0",
       "targets": [
@@ -163,14 +159,14 @@
             "uid": "Prometheus"
           },
           "editorMode": "code",
-          "expr": "academico_quality_gate_score",
-          "legendFormat": "{{service}}",
+          "expr": "academico_quality_gate_score{service=\"academico-login\"}",
+          "legendFormat": "score",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Score de quality gates",
-      "type": "bargauge"
+      "title": "Score total",
+      "type": "gauge"
     },
     {
       "datasource": {
@@ -201,25 +197,27 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 8
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 0
       },
       "id": 3,
       "options": {
-        "legend": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
       "pluginVersion": "11.4.0",
       "targets": [
@@ -229,14 +227,14 @@
             "uid": "Prometheus"
           },
           "editorMode": "code",
-          "expr": "academico_core_probe_duration_seconds{gate=\"health\"}",
-          "legendFormat": "{{service}}",
+          "expr": "academico_core_probe_duration_seconds{service=\"academico-login\", gate=\"health\"}",
+          "legendFormat": "health",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Latencia de health probes",
-      "type": "timeseries"
+      "title": "Latencia health via gateway",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -278,12 +276,116 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 8
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 0
       },
       "id": 4,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "academico_quality_gate_auth_guard_pass{service=\"academico-login\"}",
+          "legendFormat": "auth_guard",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway API key",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "0": {
+                  "color": "red",
+                  "text": "Fail"
+                },
+                "1": {
+                  "color": "green",
+                  "text": "Pass"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "metrics"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "orange",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 5,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
@@ -308,14 +410,138 @@
             "uid": "Prometheus"
           },
           "editorMode": "code",
-          "expr": "academico_quality_gate_metrics_pass",
-          "legendFormat": "{{service}}",
+          "expr": "{__name__=~\"academico_quality_gate_(health|readiness|liveness|latency|auth_guard|metrics)_pass\", service=\"academico-login\"}",
+          "legendFormat": "{{__name__}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Gate de metricas nativas",
+      "title": "Matriz de gates",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 1.5
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "academico_core_probe_duration_seconds{service=\"academico-login\"}",
+          "legendFormat": "{{gate}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Duracion de probes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "editorMode": "code",
+          "expr": "academico_core_probe_http_status{service=\"academico-login\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "{{gate}} {{path}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP status por probe",
+      "type": "table"
     }
   ],
   "refresh": "15s",
@@ -323,7 +549,8 @@
   "tags": [
     "academico",
     "quality-gates",
-    "core-assets"
+    "login",
+    "gateway"
   ],
   "templating": {
     "list": []
@@ -334,7 +561,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Academico Quality Gates",
+  "title": "Academico Login Quality Gates via Gateway",
   "uid": "academico-quality-gates",
   "version": 1,
   "weekStart": ""

@@ -6,6 +6,8 @@ services:
     depends_on:
       - prometheus
       - grafana
+    ports:
+      - "8080:80"
     networks:
       - default
       - proxy
@@ -16,6 +18,8 @@ services:
     container_name: academico-quality-gates-prometheus
     depends_on:
       - quality-exporter
+    ports:
+      - "9090:9090"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -33,17 +37,22 @@ services:
       context: ./exporter
     container_name: academico-quality-gates-exporter
     environment:
-      ACADEMICO_TARGET_HOST: host.docker.internal
+      ACADEMICO_TARGET_HOST: ${ACADEMICO_TARGET_HOST:-host.docker.internal}
+      ACADEMICO_GATEWAY_PORT: ${ACADEMICO_GATEWAY_PORT:-3000}
       EXPORTER_PORT: "9200"
       LATENCY_THRESHOLD_SECONDS: "0.75"
       PROBE_TIMEOUT_MS: "2500"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      - "9200:9200"
     restart: unless-stopped
 
   grafana:
     image: grafana/grafana-oss:11.4.0
     container_name: academico-quality-gates-grafana
+    ports:
+      - "3007:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}

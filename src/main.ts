@@ -4,19 +4,21 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
-  ExternalLink,
+  Clock3,
   Gauge,
+  KeyRound,
   RefreshCw,
+  Server,
   ShieldCheck,
   XCircle,
   createIcons,
 } from 'lucide';
 import {
-  LATENCY_THRESHOLD_SECONDS,
-  coreServices,
+  LOGIN_LATENCY_THRESHOLD_SECONDS,
   gateDefinitions,
-  type CoreService,
+  loginService,
   type GateDefinition,
+  type GateSeverity,
 } from './quality-gates';
 import { PrometheusClient } from './prometheus';
 
@@ -25,18 +27,14 @@ type GateStatus = 'pass' | 'fail' | 'warn' | 'unknown';
 type GateResult = {
   definition: GateDefinition;
   value: number | null;
+  httpStatus: number | null;
+  durationSeconds: number | null;
   status: GateStatus;
 };
 
-type ServiceQualityState = {
-  service: CoreService;
-  gates: GateResult[];
-  latencySeconds: number | null;
-  score: number | null;
-};
-
 type DashboardState = {
-  services: ServiceQualityState[];
+  gates: GateResult[];
+  score: number | null;
   loading: boolean;
   error: string | null;
   lastUpdated: Date | null;
@@ -45,25 +43,27 @@ type DashboardState = {
 const app = document.querySelector<HTMLDivElement>('#app');
 const prometheus = new PrometheusClient();
 const grafanaUrl = import.meta.env.VITE_GRAFANA_URL || '/grafana/';
-const prometheusUrl = import.meta.env.VITE_PROMETHEUS_URL || '/api/prometheus/query?query=up';
+const prometheusUrl =
+  import.meta.env.VITE_PROMETHEUS_URL ||
+  `/api/prometheus/query?query=${encodeURIComponent(
+    'academico_quality_gate_score{service="academico-login"}',
+  )}`;
 
 let state: DashboardState = {
-  services: coreServices.map((service) => emptyServiceState(service)),
+  gates: gateDefinitions.map((definition) => emptyGateResult(definition)),
+  score: null,
   loading: true,
   error: null,
   lastUpdated: null,
 };
 
-function emptyServiceState(service: CoreService): ServiceQualityState {
+function emptyGateResult(definition: GateDefinition): GateResult {
   return {
-    service,
-    gates: gateDefinitions.map((definition) => ({
-      definition,
-      value: null,
-      status: 'unknown',
-    })),
-    latencySeconds: null,
-    score: null,
+    definition,
+    value: null,
+    httpStatus: null,
+    durationSeconds: null,
+    status: 'unknown',
   };
 }
 
@@ -72,39 +72,26 @@ function gateStatus(definition: GateDefinition, value: number | null): GateStatu
     return 'unknown';
   }
 
-  if (definition.id === 'metrics' && value !== 1) {
-    return 'warn';
+  if (value === 1) {
+    return 'pass';
   }
 
-  return value === 1 ? 'pass' : 'fail';
+  return definition.severity === 'advisory' ? 'warn' : 'fail';
 }
 
-async function loadService(service: CoreService): Promise<ServiceQualityState> {
-  const gates = await Promise.all(
-    gateDefinitions.map(async (definition) => {
-      const value = await prometheus.scalar(definition.query(service.id));
-      return {
-        definition,
-        value,
-        status: gateStatus(definition, value),
-      };
-    }),
-  );
-
-  const latencySeconds = await prometheus.scalar(
-    `academico_core_probe_duration_seconds{gate="health", service="${service.id}"}`,
-  );
-
-  const hardGates = gates.filter((gate) => gate.definition.id !== 'metrics');
-  const hardGateFailures = hardGates.some((gate) => gate.status === 'fail' || gate.status === 'unknown');
-  const passed = gates.filter((gate) => gate.status === 'pass').length;
-  const score = hardGateFailures ? passed / gates.length : passed / gates.length;
+async function loadGate(definition: GateDefinition): Promise<GateResult> {
+  const [value, httpStatus, durationSeconds] = await Promise.all([
+    prometheus.scalar(definition.passQuery(loginService.id)),
+    prometheus.scalar(definition.statusQuery(loginService.id)),
+    prometheus.scalar(definition.durationQuery(loginService.id)),
+  ]);
 
   return {
-    service,
-    gates,
-    latencySeconds,
-    score,
+    definition,
+    value,
+    httpStatus,
+    durationSeconds,
+    status: gateStatus(definition, value),
   };
 }
 
@@ -117,9 +104,14 @@ async function refresh(): Promise<void> {
   render();
 
   try {
-    const services = await Promise.all(coreServices.map((service) => loadService(service)));
+    const [gates, score] = await Promise.all([
+      Promise.all(gateDefinitions.map((definition) => loadGate(definition))),
+      prometheus.scalar(`academico_quality_gate_score{service="${loginService.id}"}`),
+    ]);
+
     state = {
-      services,
+      gates,
+      score,
       loading: false,
       error: null,
       lastUpdated: new Date(),
@@ -147,26 +139,58 @@ function statusLabel(status: GateStatus): string {
   return labels[status];
 }
 
-function serviceStatus(serviceState: ServiceQualityState): GateStatus {
-  const blocking = serviceState.gates.filter((gate) => gate.definition.id !== 'metrics');
-  if (blocking.some((gate) => gate.status === 'fail')) {
+function severityLabel(severity: GateSeverity): string {
+  return severity === 'required' ? 'Requerido' : 'No bloqueante';
+}
+
+function dashboardStatus(): GateStatus {
+  const required = state.gates.filter((gate) => gate.definition.severity === 'required');
+
+  if (required.some((gate) => gate.status === 'fail')) {
     return 'fail';
   }
-  if (blocking.some((gate) => gate.status === 'unknown')) {
+
+  if (required.some((gate) => gate.status === 'unknown')) {
     return 'unknown';
   }
-  if (serviceState.gates.some((gate) => gate.status === 'warn')) {
+
+  if (state.gates.some((gate) => gate.status === 'warn')) {
     return 'warn';
   }
+
   return 'pass';
 }
 
-function formatLatency(seconds: number | null): string {
+function requiredSummary(): { passed: number; total: number } {
+  const required = state.gates.filter((gate) => gate.definition.severity === 'required');
+  return {
+    passed: required.filter((gate) => gate.status === 'pass').length,
+    total: required.length,
+  };
+}
+
+function findGate(id: GateDefinition['id']): GateResult | undefined {
+  return state.gates.find((gate) => gate.definition.id === id);
+}
+
+function formatDuration(seconds: number | null): string {
   if (seconds === null) {
     return 'N/D';
   }
 
-  return `${Math.round(seconds * 1000)} ms`;
+  if (seconds < 1) {
+    return `${Math.round(seconds * 1000)} ms`;
+  }
+
+  return `${seconds.toFixed(2)} s`;
+}
+
+function formatHttpStatus(status: number | null): string {
+  if (status === null) {
+    return 'N/D';
+  }
+
+  return status > 0 ? `HTTP ${Math.round(status)}` : 'Sin respuesta';
 }
 
 function scorePercent(score: number | null): string {
@@ -190,7 +214,7 @@ function latencyWidth(seconds: number | null): string {
     return '0%';
   }
 
-  return `${Math.max(6, Math.min(100, Math.round((seconds / LATENCY_THRESHOLD_SECONDS) * 100)))}%`;
+  return `${Math.max(6, Math.min(100, Math.round((seconds / LOGIN_LATENCY_THRESHOLD_SECONDS) * 100)))}%`;
 }
 
 function iconForStatus(status: GateStatus): string {
@@ -204,21 +228,13 @@ function iconForStatus(status: GateStatus): string {
   return icons[status];
 }
 
-function dashboardSummary() {
-  const total = state.services.length;
-  const pass = state.services.filter((service) => serviceStatus(service) === 'pass').length;
-  const warn = state.services.filter((service) => serviceStatus(service) === 'warn').length;
-  const fail = state.services.filter((service) => serviceStatus(service) === 'fail').length;
-  const unknown = state.services.filter((service) => serviceStatus(service) === 'unknown').length;
-  const avgScoreValues = state.services
-    .map((service) => service.score)
-    .filter((score): score is number => score !== null);
-  const avgScore =
-    avgScoreValues.length === 0
-      ? null
-      : avgScoreValues.reduce((totalScore, score) => totalScore + score, 0) / avgScoreValues.length;
-
-  return { total, pass, warn, fail, unknown, avgScore };
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function render() {
@@ -226,7 +242,11 @@ function render() {
     return;
   }
 
-  const summary = dashboardSummary();
+  const status = dashboardStatus();
+  const required = requiredSummary();
+  const latencyGate = findGate('latency');
+  const authGuardGate = findGate('auth_guard');
+  const metricsGate = findGate('metrics');
   const updated = state.lastUpdated
     ? state.lastUpdated.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
     : 'Pendiente';
@@ -235,8 +255,8 @@ function render() {
     <main class="shell">
       <header class="topbar">
         <div class="title-block">
-          <span class="system-label">academic-mgmt-org</span>
-          <h1>Quality Gates Core Assets</h1>
+          <span class="system-label">${loginService.id} via ${loginService.gateway.id} :${loginService.gateway.port}</span>
+          <h1>Quality Gates Login via Gateway</h1>
         </div>
         <nav class="actions" aria-label="Acciones de monitoreo">
           <a class="icon-button" href="${grafanaUrl}" target="_blank" rel="noreferrer" title="Abrir Grafana">
@@ -247,35 +267,100 @@ function render() {
             <i data-lucide="activity"></i>
             <span>Prometheus</span>
           </a>
-          <button class="icon-button primary" type="button" id="refresh-button" title="Actualizar estado">
+          <button class="icon-button primary" type="button" id="refresh-button" title="Actualizar estado" ${
+            state.loading ? 'disabled' : ''
+          }>
             <i data-lucide="refresh-cw"></i>
             <span>${state.loading ? 'Actualizando' : 'Actualizar'}</span>
           </button>
         </nav>
       </header>
 
-      <section class="summary-grid" aria-label="Resumen">
-        ${summaryTile('Servicios', String(summary.total), 'shield-check', 'neutral')}
-        ${summaryTile('Pass', String(summary.pass), 'check-circle-2', 'pass')}
-        ${summaryTile('Warn', String(summary.warn), 'alert-triangle', 'warn')}
-        ${summaryTile('Fail', String(summary.fail), 'x-circle', 'fail')}
-        ${summaryTile('Sin dato', String(summary.unknown), 'activity', 'unknown')}
-        ${summaryTile('Score medio', scorePercent(summary.avgScore), 'gauge', 'neutral')}
+      <section class="summary-grid" aria-label="Resumen de login">
+        ${summaryTile('Estado', statusLabel(status), iconForStatus(status), status)}
+        ${summaryTile('Requeridos', `${required.passed}/${required.total}`, 'shield-check', status)}
+        ${summaryTile('Score', scorePercent(state.score), 'gauge', 'neutral')}
+        ${summaryTile('Health latency', formatDuration(latencyGate?.durationSeconds ?? null), 'clock-3', latencyGate?.status ?? 'unknown')}
+        ${summaryTile('Gateway API key', statusLabel(authGuardGate?.status ?? 'unknown'), 'key-round', authGuardGate?.status ?? 'unknown')}
+        ${summaryTile('Metrics', statusLabel(metricsGate?.status ?? 'unknown'), 'server', metricsGate?.status ?? 'unknown')}
       </section>
 
-      ${state.error ? `<p class="connection-error">${state.error}</p>` : ''}
+      ${state.error ? `<p class="connection-error">${escapeHtml(state.error)}</p>` : ''}
+
+      <section class="overview-grid" aria-label="Contexto del servicio">
+        <article class="service-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="tier">${loginService.tier}</span>
+              <h2>${loginService.name}</h2>
+            </div>
+            <span class="status-badge ${status}">
+              <i data-lucide="${iconForStatus(status)}"></i>
+              ${statusLabel(status)}
+            </span>
+          </div>
+          <p class="service-description">${loginService.description}</p>
+          <div class="service-meta">
+            <span>${loginService.repository}</span>
+            <span>${loginService.gateway.id}${loginService.gateway.routePrefix}</span>
+          </div>
+          <div class="meters">
+            <div class="meter-row">
+              <span>Score</span>
+              <strong>${scorePercent(state.score)}</strong>
+              <div class="meter">
+                <span style="width: ${scoreWidth(state.score)}"></span>
+              </div>
+            </div>
+            <div class="meter-row latency">
+              <span>Latency</span>
+              <strong>${formatDuration(latencyGate?.durationSeconds ?? null)}</strong>
+              <div class="meter">
+                <span style="width: ${latencyWidth(latencyGate?.durationSeconds ?? null)}"></span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="contract-panel">
+          <div class="panel-heading compact">
+            <div>
+              <span class="tier">contrato</span>
+              <h2>Endpoints auth</h2>
+            </div>
+            <i data-lucide="shield-check"></i>
+          </div>
+          <div class="contract-list">
+            ${loginService.contracts.map(contractRow).join('')}
+          </div>
+        </article>
+      </section>
 
       <section class="matrix-header">
         <div>
-          <h2>Servicios core</h2>
+          <h2>Gates en vivo</h2>
           <p>Ultima lectura: ${updated}</p>
         </div>
-        <span class="threshold">Latency gate <= ${Math.round(LATENCY_THRESHOLD_SECONDS * 1000)} ms</span>
+        <span class="threshold">Latency gate <= ${Math.round(LOGIN_LATENCY_THRESHOLD_SECONDS * 1000)} ms</span>
       </section>
 
-      <section class="service-grid" aria-label="Estado por servicio">
-        ${state.services.map(serviceCard).join('')}
-      </section>
+      <div class="gate-table-shell">
+        <table class="gate-table">
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>Estado</th>
+              <th>Criterio</th>
+              <th>HTTP</th>
+              <th>Duracion</th>
+              <th>Tipo</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.gates.map(gateRow).join('')}
+          </tbody>
+        </table>
+      </div>
     </main>
   `;
 
@@ -289,9 +374,11 @@ function render() {
       AlertTriangle,
       BarChart3,
       CheckCircle2,
-      ExternalLink,
+      Clock3,
       Gauge,
+      KeyRound,
       RefreshCw,
+      Server,
       ShieldCheck,
       XCircle,
     },
@@ -310,61 +397,37 @@ function summaryTile(label: string, value: string, icon: string, tone: GateStatu
   `;
 }
 
-function serviceCard(serviceState: ServiceQualityState): string {
-  const status = serviceStatus(serviceState);
-  const service = serviceState.service;
-  const gatePills = serviceState.gates
-    .map(
-      (gate) => `
-        <span class="gate-pill ${gate.status}" title="${gate.definition.thresholdLabel}">
-          <i data-lucide="${iconForStatus(gate.status)}"></i>
-          ${gate.definition.name}
-        </span>
-      `,
-    )
-    .join('');
-
+function contractRow(contract: (typeof loginService.contracts)[number]): string {
   return `
-    <article class="service-card ${status}">
-      <div class="service-heading">
-        <div>
-          <span class="tier">${service.tier}</span>
-          <h3>${service.name}</h3>
+    <div class="contract-row">
+      <span class="method">${contract.method}</span>
+      <code>${contract.path}</code>
+      <span>${contract.purpose}</span>
+    </div>
+  `;
+}
+
+function gateRow(gate: GateResult): string {
+  return `
+    <tr class="${gate.status}">
+      <td>
+        <div class="gate-name">
+          <i data-lucide="${iconForStatus(gate.status)}"></i>
+          <strong>${gate.definition.name}</strong>
         </div>
-        <span class="status-badge ${status}">
-          <i data-lucide="${iconForStatus(status)}"></i>
-          ${statusLabel(status)}
+      </td>
+      <td>
+        <span class="status-badge ${gate.status}">
+          ${statusLabel(gate.status)}
         </span>
-      </div>
-
-      <p class="service-description">${service.description}</p>
-
-      <div class="service-meta">
-        <span>${service.id}</span>
-        <span>:${service.port}</span>
-      </div>
-
-      <div class="gate-list">
-        ${gatePills}
-      </div>
-
-      <div class="meters">
-        <div class="meter-row">
-          <span>Score</span>
-          <strong>${scorePercent(serviceState.score)}</strong>
-          <div class="meter">
-            <span style="width: ${scoreWidth(serviceState.score)}"></span>
-          </div>
-        </div>
-        <div class="meter-row latency">
-          <span>Latency</span>
-          <strong>${formatLatency(serviceState.latencySeconds)}</strong>
-          <div class="meter">
-            <span style="width: ${latencyWidth(serviceState.latencySeconds)}"></span>
-          </div>
-        </div>
-      </div>
-    </article>
+      </td>
+      <td>${gate.definition.thresholdLabel}</td>
+      <td>${formatHttpStatus(gate.httpStatus)}</td>
+      <td>${formatDuration(gate.durationSeconds)}</td>
+      <td>
+        <span class="severity ${gate.definition.severity}">${severityLabel(gate.definition.severity)}</span>
+      </td>
+    </tr>
   `;
 }
 

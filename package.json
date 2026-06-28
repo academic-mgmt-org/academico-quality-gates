@@ -1,7 +1,7 @@
 {
   "name": "academico-quality-gates",
   "version": "0.1.0",
-  "description": "Web de monitoreo para quality gates de servicios core assets con Prometheus y Grafana.",
+  "description": "Web de monitoreo para quality gates de academico-login via academico-gateway con Prometheus y Grafana.",
   "private": true,
   "type": "module",
   "scripts": {

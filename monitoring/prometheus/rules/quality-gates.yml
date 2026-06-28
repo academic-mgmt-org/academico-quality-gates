@@ -1,58 +1,96 @@
 groups:
-  - name: academico-quality-gates
+  - name: academico-login-quality-gates
     interval: 15s
     rules:
       - record: academico_quality_gate_health_pass
-        expr: min by (service) (academico_core_probe_success{gate="health"})
+        expr: min by (service) (academico_core_probe_success{gate="health", service="academico-login"})
 
       - record: academico_quality_gate_readiness_pass
-        expr: min by (service) (academico_core_probe_success{gate="readiness"})
+        expr: min by (service) (academico_core_probe_success{gate="readiness", service="academico-login"})
+
+      - record: academico_quality_gate_liveness_pass
+        expr: min by (service) (academico_core_probe_success{gate="liveness", service="academico-login"})
 
       - record: academico_quality_gate_latency_pass
-        expr: min by (service) (academico_core_probe_success{gate="health"}) * on (service) (max by (service) (academico_core_probe_duration_seconds{gate="health"}) <= bool 0.75)
+        expr: min by (service) (academico_core_probe_success{gate="health", service="academico-login"}) * on (service) (max by (service) (academico_core_probe_duration_seconds{gate="health", service="academico-login"}) <= bool 0.75)
+
+      - record: academico_quality_gate_auth_guard_pass
+        expr: min by (service) (academico_core_probe_success{gate="auth_guard", service="academico-login"})
 
       - record: academico_quality_gate_metrics_pass
-        expr: min by (service) (academico_core_probe_success{gate="metrics"})
+        expr: min by (service) (academico_core_probe_success{gate="metrics", service="academico-login"})
+
+      - record: academico_quality_gate_required_score
+        expr: (academico_quality_gate_health_pass + academico_quality_gate_readiness_pass + academico_quality_gate_liveness_pass + academico_quality_gate_latency_pass + academico_quality_gate_auth_guard_pass) / 5
+
+      - record: academico_quality_gate_required_pass
+        expr: academico_quality_gate_required_score == bool 1
 
       - record: academico_quality_gate_score
-        expr: (academico_quality_gate_health_pass + academico_quality_gate_readiness_pass + academico_quality_gate_latency_pass + academico_quality_gate_metrics_pass) / 4
+        expr: (academico_quality_gate_health_pass + academico_quality_gate_readiness_pass + academico_quality_gate_liveness_pass + academico_quality_gate_latency_pass + academico_quality_gate_auth_guard_pass + academico_quality_gate_metrics_pass) / 6
 
-      - alert: AcademicoQualityGateHealthFailed
-        expr: academico_quality_gate_health_pass == 0
+      - alert: AcademicoLoginHealthFailed
+        expr: academico_quality_gate_health_pass{service="academico-login"} == 0
         for: 2m
         labels:
           severity: critical
           gate: health
+          service: academico-login
         annotations:
-          summary: "Health gate failed for {{ $labels.service }}"
-          description: "{{ $labels.service }} no responde satisfactoriamente en /api/health."
+          summary: "Health gate failed for academico-login via gateway"
+          description: "academico-login no responde satisfactoriamente en /login/api/health a traves de academico-gateway."
 
-      - alert: AcademicoQualityGateReadinessFailed
-        expr: academico_quality_gate_readiness_pass == 0
+      - alert: AcademicoLoginReadinessFailed
+        expr: academico_quality_gate_readiness_pass{service="academico-login"} == 0
         for: 2m
         labels:
           severity: critical
           gate: readiness
+          service: academico-login
         annotations:
-          summary: "Readiness gate failed for {{ $labels.service }}"
-          description: "{{ $labels.service }} no esta listo para recibir trafico."
+          summary: "Readiness gate failed for academico-login via gateway"
+          description: "academico-login no responde satisfactoriamente en /login/api/ready a traves de academico-gateway."
 
-      - alert: AcademicoQualityGateLatencyFailed
-        expr: academico_quality_gate_latency_pass == 0
+      - alert: AcademicoLoginLivenessFailed
+        expr: academico_quality_gate_liveness_pass{service="academico-login"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          gate: liveness
+          service: academico-login
+        annotations:
+          summary: "Liveness gate failed for academico-login via gateway"
+          description: "academico-login no responde satisfactoriamente en /login/api/live a traves de academico-gateway."
+
+      - alert: AcademicoLoginLatencyFailed
+        expr: academico_quality_gate_latency_pass{service="academico-login"} == 0
         for: 5m
         labels:
           severity: warning
           gate: latency
+          service: academico-login
         annotations:
-          summary: "Latency gate failed for {{ $labels.service }}"
-          description: "{{ $labels.service }} supera el limite de 750 ms en el health probe."
+          summary: "Latency gate failed for academico-login via gateway"
+          description: "academico-login supera el limite de 750 ms en el health probe /login/api/health medido a traves de academico-gateway."
 
-      - alert: AcademicoQualityGateMetricsFailed
-        expr: academico_quality_gate_metrics_pass == 0
+      - alert: AcademicoLoginGatewayApiKeyFailed
+        expr: academico_quality_gate_auth_guard_pass{service="academico-login"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          gate: auth_guard
+          service: academico-login
+        annotations:
+          summary: "Gateway API key delegation failed for academico-login"
+          description: "La ruta /login/api/v1/whitelist/all no responde 2xx a traves de academico-gateway con la API key interna."
+
+      - alert: AcademicoLoginMetricsFailed
+        expr: academico_quality_gate_metrics_pass{service="academico-login"} == 0
         for: 10m
         labels:
           severity: warning
           gate: metrics
+          service: academico-login
         annotations:
-          summary: "Metrics gate failed for {{ $labels.service }}"
-          description: "{{ $labels.service }} no expone /metrics o el exporter no puede leerlo."
+          summary: "Metrics gate failed for academico-login via gateway"
+          description: "academico-login no expone /login/metrics a traves de academico-gateway o el exporter no puede leerlo."

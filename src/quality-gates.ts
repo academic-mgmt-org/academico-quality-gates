@@ -1,106 +1,145 @@
-export type ServiceTier = 'edge' | 'auth' | 'identity' | 'academic';
+export type LoginGateId = 'health' | 'readiness' | 'liveness' | 'latency' | 'auth_guard' | 'metrics';
 
-export type CoreService = {
-  id: string;
+export type GateSeverity = 'required' | 'advisory';
+
+export type LoginService = {
+  id: 'academico-login';
   name: string;
-  tier: ServiceTier;
+  tier: 'auth';
   port: number;
+  gateway: {
+    id: 'academico-gateway';
+    port: number;
+    routePrefix: '/login';
+  };
   repository: string;
   description: string;
+  contracts: Array<{
+    method: 'GET' | 'POST';
+    path: string;
+    purpose: string;
+  }>;
 };
 
 export type GateDefinition = {
-  id: 'health' | 'readiness' | 'latency' | 'metrics';
+  id: LoginGateId;
   name: string;
+  severity: GateSeverity;
+  probeGate: string;
   thresholdLabel: string;
-  query: (serviceId: string) => string;
+  passQuery: (serviceId: string) => string;
+  statusQuery: (serviceId: string) => string;
+  durationQuery: (serviceId: string) => string;
 };
 
-export const LATENCY_THRESHOLD_SECONDS = 0.75;
+export const LOGIN_LATENCY_THRESHOLD_SECONDS = 0.75;
 
-export const coreServices: CoreService[] = [
-  {
+export const loginService: LoginService = {
+  id: 'academico-login',
+  name: 'Academico Login',
+  tier: 'auth',
+  port: 3001,
+  gateway: {
     id: 'academico-gateway',
-    name: 'Gateway',
-    tier: 'edge',
     port: 3000,
-    repository: 'academic-mgmt-org/academico-gateway',
-    description: 'Entrada HTTP y routing hacia los microservicios core.',
+    routePrefix: '/login',
   },
-  {
-    id: 'academico-login',
-    name: 'Login',
-    tier: 'auth',
-    port: 3001,
-    repository: 'academic-mgmt-org/academico-login',
-    description: 'Autenticacion y emision de tokens.',
-  },
-  {
-    id: 'academico-calificaciones',
-    name: 'Calificaciones',
-    tier: 'academic',
-    port: 3002,
-    repository: 'academic-mgmt-org/academico-calificaciones',
-    description: 'Gestion de calificaciones y evaluaciones.',
-  },
-  {
-    id: 'academico-notificaciones',
-    name: 'Notificaciones',
-    tier: 'academic',
-    port: 3003,
-    repository: 'academic-mgmt-org/academico-notificaciones',
-    description: 'Notificaciones academicas y mensajeria operativa.',
-  },
-  {
-    id: 'academico-matriculas',
-    name: 'Matriculas',
-    tier: 'academic',
-    port: 3004,
-    repository: 'academic-mgmt-org/academico-matriculas',
-    description: 'Matriculas e inscripciones.',
-  },
-  {
-    id: 'academico-solicitudes',
-    name: 'Solicitudes',
-    tier: 'academic',
-    port: 3005,
-    repository: 'academic-mgmt-org/academico-solicitudes',
-    description: 'Solicitudes y tramites academicos.',
-  },
-  {
-    id: 'academico-usuarios',
-    name: 'Usuarios',
-    tier: 'identity',
-    port: 3006,
-    repository: 'academic-mgmt-org/academico-usuarios',
-    description: 'Gestion de usuarios academicos.',
-  },
-];
+  repository: 'academic-mgmt-org/academico-login',
+  description: 'Autenticacion, emision de JWT, refresh, logout y validacion de tokens medidos a traves de academico-gateway.',
+  contracts: [
+    {
+      method: 'POST',
+      path: '/login/api/v1/auth/login',
+      purpose: 'Credenciales a accessToken y refreshToken',
+    },
+    {
+      method: 'POST',
+      path: '/login/api/v1/auth/refresh',
+      purpose: 'Renovacion de accessToken',
+    },
+    {
+      method: 'POST',
+      path: '/login/api/v1/auth/logout',
+      purpose: 'Revocacion de sesion',
+    },
+    {
+      method: 'POST',
+      path: '/login/api/v1/auth/validate-token-2',
+      purpose: 'Validacion de JWT para gateway',
+    },
+    {
+      method: 'GET',
+      path: '/login/api/v1/whitelist/all',
+      purpose: 'Whitelist expuesta por gateway con API key interna',
+    },
+  ],
+};
+
+const passMetric = (gate: LoginGateId, serviceId: string) =>
+  `academico_quality_gate_${gate}_pass{service="${serviceId}"}`;
+
+const probeMetric = (metric: string, gate: string, serviceId: string) =>
+  `${metric}{gate="${gate}", service="${serviceId}"}`;
 
 export const gateDefinitions: GateDefinition[] = [
   {
     id: 'health',
     name: 'Health',
-    thresholdLabel: 'HTTP 2xx',
-    query: (serviceId) => `academico_quality_gate_health_pass{service="${serviceId}"}`,
+    severity: 'required',
+    probeGate: 'health',
+    thresholdLabel: 'GET /login/api/health -> 2xx',
+    passQuery: (serviceId) => passMetric('health', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'health', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'health', serviceId),
   },
   {
     id: 'readiness',
-    name: 'Ready',
-    thresholdLabel: 'HTTP 2xx',
-    query: (serviceId) => `academico_quality_gate_readiness_pass{service="${serviceId}"}`,
+    name: 'Readiness',
+    severity: 'required',
+    probeGate: 'readiness',
+    thresholdLabel: 'GET /login/api/ready -> 2xx',
+    passQuery: (serviceId) => passMetric('readiness', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'readiness', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'readiness', serviceId),
+  },
+  {
+    id: 'liveness',
+    name: 'Liveness',
+    severity: 'required',
+    probeGate: 'liveness',
+    thresholdLabel: 'GET /login/api/live -> 2xx',
+    passQuery: (serviceId) => passMetric('liveness', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'liveness', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'liveness', serviceId),
   },
   {
     id: 'latency',
     name: 'Latency',
-    thresholdLabel: '<= 750 ms',
-    query: (serviceId) => `academico_quality_gate_latency_pass{service="${serviceId}"}`,
+    severity: 'required',
+    probeGate: 'health',
+    thresholdLabel: `health <= ${Math.round(LOGIN_LATENCY_THRESHOLD_SECONDS * 1000)} ms`,
+    passQuery: (serviceId) => passMetric('latency', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'health', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'health', serviceId),
+  },
+  {
+    id: 'auth_guard',
+    name: 'Gateway API key',
+    severity: 'required',
+    probeGate: 'auth_guard',
+    thresholdLabel: 'GET /login/api/v1/whitelist/all -> 2xx',
+    passQuery: (serviceId) => passMetric('auth_guard', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'auth_guard', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'auth_guard', serviceId),
   },
   {
     id: 'metrics',
     name: 'Metrics',
-    thresholdLabel: '/metrics up',
-    query: (serviceId) => `academico_quality_gate_metrics_pass{service="${serviceId}"}`,
+    severity: 'advisory',
+    probeGate: 'metrics',
+    thresholdLabel: 'GET /login/metrics -> 2xx',
+    passQuery: (serviceId) => passMetric('metrics', serviceId),
+    statusQuery: (serviceId) => probeMetric('academico_core_probe_http_status', 'metrics', serviceId),
+    durationQuery: (serviceId) => probeMetric('academico_core_probe_duration_seconds', 'metrics', serviceId),
   },
 ];
-

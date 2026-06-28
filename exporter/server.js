@@ -3,65 +3,53 @@ const http2 = require('node:http2');
 
 const PORT = Number(process.env.EXPORTER_PORT || 9200);
 const TARGET_HOST = process.env.ACADEMICO_TARGET_HOST || 'host.docker.internal';
+const GATEWAY_PORT = Number(process.env.ACADEMICO_GATEWAY_PORT || process.env.ACADEMICO_LOGIN_PORT || 3000);
 const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS || 2500);
 const LATENCY_THRESHOLD_SECONDS = Number(process.env.LATENCY_THRESHOLD_SECONDS || 0.75);
 
 const services = [
   {
-    id: 'academico-gateway',
-    name: 'Gateway',
-    tier: 'edge',
-    port: 3000,
-    repository: 'academic-mgmt-org/academico-gateway',
-  },
-  {
     id: 'academico-login',
-    name: 'Login',
+    name: 'Academico Login',
     tier: 'auth',
-    port: 3001,
+    port: GATEWAY_PORT,
+    gateway: 'academico-gateway',
+    routePrefix: '/login',
     repository: 'academic-mgmt-org/academico-login',
-  },
-  {
-    id: 'academico-calificaciones',
-    name: 'Calificaciones',
-    tier: 'academic',
-    port: 3002,
-    repository: 'academic-mgmt-org/academico-calificaciones',
-  },
-  {
-    id: 'academico-notificaciones',
-    name: 'Notificaciones',
-    tier: 'academic',
-    port: 3003,
-    repository: 'academic-mgmt-org/academico-notificaciones',
-  },
-  {
-    id: 'academico-matriculas',
-    name: 'Matriculas',
-    tier: 'academic',
-    port: 3004,
-    repository: 'academic-mgmt-org/academico-matriculas',
-  },
-  {
-    id: 'academico-solicitudes',
-    name: 'Solicitudes',
-    tier: 'academic',
-    port: 3005,
-    repository: 'academic-mgmt-org/academico-solicitudes',
-  },
-  {
-    id: 'academico-usuarios',
-    name: 'Usuarios',
-    tier: 'identity',
-    port: 3006,
-    repository: 'academic-mgmt-org/academico-usuarios',
   },
 ];
 
 const gates = [
-  { id: 'health', path: '/api/health' },
-  { id: 'readiness', path: '/api/ready' },
-  { id: 'metrics', path: '/metrics' },
+  {
+    id: 'health',
+    method: 'GET',
+    path: '/login/api/health',
+    expectedStatuses: null,
+  },
+  {
+    id: 'readiness',
+    method: 'GET',
+    path: '/login/api/ready',
+    expectedStatuses: null,
+  },
+  {
+    id: 'liveness',
+    method: 'GET',
+    path: '/login/api/live',
+    expectedStatuses: null,
+  },
+  {
+    id: 'auth_guard',
+    method: 'GET',
+    path: '/login/api/v1/whitelist/all',
+    expectedStatuses: null,
+  },
+  {
+    id: 'metrics',
+    method: 'GET',
+    path: '/login/metrics',
+    expectedStatuses: null,
+  },
 ];
 
 function escapeLabel(value) {
@@ -74,17 +62,26 @@ function labels(values) {
     .join(',');
 }
 
-function isSuccess(statusCode) {
+function expectedStatusLabel(gate) {
+  return gate.expectedStatuses ? gate.expectedStatuses.join('|') : '2xx';
+}
+
+function isSuccess(statusCode, gate) {
+  if (gate.expectedStatuses) {
+    return gate.expectedStatuses.includes(statusCode);
+  }
+
   return statusCode >= 200 && statusCode < 300;
 }
 
-function probeHttp1(target) {
+function probeHttp1(target, gate) {
   return new Promise((resolve, reject) => {
-    const request = http.get(
+    const request = http.request(
       {
         hostname: target.hostname,
         port: target.port,
         path: `${target.pathname}${target.search}`,
+        method: gate.method,
         timeout: TIMEOUT_MS,
       },
       (response) => {
@@ -102,10 +99,11 @@ function probeHttp1(target) {
       request.destroy(new Error('timeout'));
     });
     request.on('error', reject);
+    request.end();
   });
 }
 
-function probeHttp2(target) {
+function probeHttp2(target, gate) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const client = http2.connect(`${target.protocol}//${target.host}`);
@@ -131,7 +129,7 @@ function probeHttp2(target) {
     });
 
     const request = client.request({
-      ':method': 'GET',
+      ':method': gate.method,
       ':path': `${target.pathname}${target.search}`,
     });
     let statusCode = 0;
@@ -160,10 +158,10 @@ async function probeEndpoint(service, gate) {
   let result = null;
 
   try {
-    result = await probeHttp1(target);
+    result = await probeHttp1(target, gate);
   } catch (_) {
     try {
-      result = await probeHttp2(target);
+      result = await probeHttp2(target, gate);
     } catch (error) {
       result = {
         statusCode: 0,
@@ -181,7 +179,7 @@ async function probeEndpoint(service, gate) {
     durationSeconds,
     statusCode: result.statusCode,
     protocol: result.protocol,
-    success: isSuccess(result.statusCode),
+    success: isSuccess(result.statusCode, gate),
   };
 }
 
@@ -217,12 +215,14 @@ function renderMetrics(results) {
         tier: service.tier,
         repository: service.repository,
         port: service.port,
+        via: service.gateway,
+        route_prefix: service.routePrefix,
       })}} 1`,
     );
   }
 
   lines.push(
-    '# HELP academico_core_probe_success Whether a service endpoint probe returned HTTP 2xx.',
+    '# HELP academico_core_probe_success Whether a service endpoint probe met its expected HTTP status.',
     '# TYPE academico_core_probe_success gauge',
     '# HELP academico_core_probe_duration_seconds Service endpoint probe duration.',
     '# TYPE academico_core_probe_duration_seconds gauge',
@@ -234,8 +234,11 @@ function renderMetrics(results) {
     const baseLabels = labels({
       service: result.service.id,
       tier: result.service.tier,
+      via: result.service.gateway,
       gate: result.gate.id,
+      method: result.gate.method,
       path: result.gate.path,
+      expected_status: expectedStatusLabel(result.gate),
       protocol: result.protocol,
     });
     lines.push(`academico_core_probe_success{${baseLabels}} ${result.success ? 1 : 0}`);
@@ -272,4 +275,3 @@ const server = http.createServer(async (request, response) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`academico quality exporter listening on ${PORT}`);
 });
-

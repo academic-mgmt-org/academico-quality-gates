@@ -1,35 +1,48 @@
 # academico-quality-gates
 
-Web de monitoreo para los quality gates de los servicios core assets del Sistema de Gestion Academica.
+Dashboard de quality gates para `academico-login` medido a traves de `academico-gateway`.
 
-El repositorio incluye una consola web, un exporter de probes HTTP/1.1 + HTTP/2 h2c, Prometheus y Grafana provisionado con datasource y dashboard inicial.
+El repositorio incluye una consola web, un exporter de probes HTTP/1.1 + HTTP/2 h2c, Prometheus y Grafana provisionado con un tablero de login via gateway.
 
-## Servicios monitoreados
+## Servicio monitoreado
 
-| Servicio | Puerto local | Health |
+| Servicio | Entrada medida | Rol |
 | --- | ---: | --- |
-| academico-gateway | 3000 | `/api/health` |
-| academico-login | 3001 | `/api/health` |
-| academico-calificaciones | 3002 | `/api/health` |
-| academico-notificaciones | 3003 | `/api/health` |
-| academico-matriculas | 3004 | `/api/health` |
-| academico-solicitudes | 3005 | `/api/health` |
-| academico-usuarios | 3006 | `/api/health` |
+| academico-login | academico-gateway `:3000/login/*` | Autenticacion, JWT, refresh, logout y validacion de tokens |
+
+## Gates
+
+| Gate | Criterio | Tipo |
+| --- | --- | --- |
+| Health | `GET /login/api/health` responde HTTP 2xx a traves del gateway | Requerido |
+| Readiness | `GET /login/api/ready` responde HTTP 2xx a traves del gateway | Requerido |
+| Liveness | `GET /login/api/live` responde HTTP 2xx a traves del gateway | Requerido |
+| Latency | El probe de health via gateway dura `<= 750 ms` | Requerido |
+| Gateway API key | `GET /login/api/v1/whitelist/all` responde HTTP 2xx porque el gateway inyecta `x-api-key` interna | Requerido |
+| Metrics | `GET /login/metrics` responde HTTP 2xx a traves del gateway | No bloqueante |
+
+El gate `metrics` queda como no bloqueante porque la implementacion actual de `academico-login` no expone `/login/metrics` como endpoint Prometheus accesible via gateway.
 
 ## Ejecucion local
 
-Levantar primero los servicios core en sus puertos locales y despues iniciar el stack de observabilidad:
+Levantar primero `academico-gateway` en el puerto `3000` con acceso funcional a `academico-login` y despues iniciar el stack de observabilidad:
 
 ```bash
 docker compose up --build
 ```
 
-URLs:
+Para medir un gateway remoto:
 
-- Web: http://localhost:8080
-- Grafana: http://localhost:3007
-- Prometheus: http://localhost:9090
-- Quality Exporter: http://localhost:9200/metrics
+```bash
+ACADEMICO_TARGET_HOST=20.115.132.131 docker compose up --build
+```
+
+URLs del stack:
+
+- Web: `http://localhost:8080`
+- Grafana: `http://localhost:3007`
+- Prometheus: `http://localhost:9090`
+- Quality Exporter: `http://localhost:9200/metrics`
 
 Credenciales locales de Grafana:
 
@@ -46,23 +59,20 @@ npm run dev
 
 Con Prometheus levantado en `localhost:9090`, Vite redirige `/api/prometheus` hacia `http://localhost:9090/api/v1`.
 
-## Quality gates
+## Configuracion
 
-Los gates iniciales estan definidos en `monitoring/prometheus/rules/quality-gates.yml`. El exporter propio prueba primero HTTP/1.1 y despues HTTP/2 h2c, porque los microservicios NestJS actuales estan levantados con Fastify HTTP/2 cleartext.
+El exporter usa `host.docker.internal` para probar `academico-gateway` ejecutado en la maquina host. El gateway se encarga de reenviar las rutas `/login/*` hacia `academico-login`.
 
-- `health`: el endpoint `/api/health` responde HTTP 2xx.
-- `readiness`: el endpoint `/api/ready` responde HTTP 2xx.
-- `latency`: el probe de health responde en menos de 750 ms.
-- `metrics`: el servicio expone `/metrics` y Prometheus lo puede scrapear.
+Variables principales:
 
-Los servicios actuales ya exponen health/readiness/liveness. El gate `metrics` quedara fallando hasta instrumentar cada microservicio con un endpoint Prometheus `/metrics`.
+- `ACADEMICO_TARGET_HOST`: host donde escucha gateway desde el contenedor del exporter.
+- `ACADEMICO_GATEWAY_PORT`: puerto del gateway, por defecto `3000`.
+- `LATENCY_THRESHOLD_SECONDS`: umbral de latencia del health probe, por defecto `0.75`.
+- `PROBE_TIMEOUT_MS`: timeout por probe, por defecto `2500`.
 
-## Configuracion de targets
+Archivos relevantes:
 
-El exporter usa `host.docker.internal` para probar servicios ejecutados en la maquina host. Si los servicios core se ejecutan en otra red o en Kubernetes, ajustar `ACADEMICO_TARGET_HOST` o la lista de servicios en:
-
-- `monitoring/prometheus/prometheus.yml`
-- `exporter/server.js`
-- `monitoring/prometheus/rules/quality-gates.yml`
-
-La documentacion del contrato de gates esta en `docs/quality-gates.md`.
+- `src/quality-gates.ts`: contrato usado por la consola web.
+- `exporter/server.js`: probes HTTP/1.1 y HTTP/2 h2c.
+- `monitoring/prometheus/rules/quality-gates.yml`: reglas grabadas y alertas.
+- `monitoring/grafana/dashboards/quality-gates.json`: dashboard Grafana provisionado.

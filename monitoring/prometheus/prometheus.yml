@@ -16,36 +16,13 @@ scrape_configs:
       - targets:
           - quality-exporter:9200
 
-  - job_name: core_service_metrics
-    metrics_path: /metrics
+  - job_name: login_via_gateway_metrics
+    metrics_path: /login/metrics
     scrape_interval: 30s
     scrape_timeout: 5s
     static_configs:
       - targets: ["host.docker.internal:3000"]
         labels:
-          service: academico-gateway
-          tier: edge
-      - targets: ["host.docker.internal:3001"]
-        labels:
           service: academico-login
           tier: auth
-      - targets: ["host.docker.internal:3002"]
-        labels:
-          service: academico-calificaciones
-          tier: academic
-      - targets: ["host.docker.internal:3003"]
-        labels:
-          service: academico-notificaciones
-          tier: academic
-      - targets: ["host.docker.internal:3004"]
-        labels:
-          service: academico-matriculas
-          tier: academic
-      - targets: ["host.docker.internal:3005"]
-        labels:
-          service: academico-solicitudes
-          tier: academic
-      - targets: ["host.docker.internal:3006"]
-        labels:
-          service: academico-usuarios
-          tier: identity
+          via: academico-gateway
