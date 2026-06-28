@@ -1,0 +1,19 @@
+{
+  "name": "academico-quality-gates",
+  "version": "0.1.0",
+  "description": "Web de monitoreo para quality gates de servicios core assets con Prometheus y Grafana.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite --host 0.0.0.0",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.4.3"
+  }
+}

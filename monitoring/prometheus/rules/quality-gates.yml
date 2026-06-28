@@ -1,0 +1,59 @@
+groups:
+  - name: academico-quality-gates
+    interval: 15s
+    rules:
+      - record: academico_quality_gate_health_pass
+        expr: min by (service) (probe_success{job="core_http_health"})
+
+      - record: academico_quality_gate_readiness_pass
+        expr: min by (service) (probe_success{job="core_http_readiness"})
+
+      - record: academico_quality_gate_latency_pass
+        expr: max by (service) (probe_duration_seconds{job="core_http_health"}) <= bool 0.75
+
+      - record: academico_quality_gate_metrics_pass
+        expr: min by (service) (up{job="core_service_metrics"})
+
+      - record: academico_quality_gate_score
+        expr: (academico_quality_gate_health_pass + academico_quality_gate_readiness_pass + academico_quality_gate_latency_pass + academico_quality_gate_metrics_pass) / 4
+
+      - alert: AcademicoQualityGateHealthFailed
+        expr: academico_quality_gate_health_pass == 0
+        for: 2m
+        labels:
+          severity: critical
+          gate: health
+        annotations:
+          summary: "Health gate failed for {{ $labels.service }}"
+          description: "{{ $labels.service }} no responde satisfactoriamente en /api/health."
+
+      - alert: AcademicoQualityGateReadinessFailed
+        expr: academico_quality_gate_readiness_pass == 0
+        for: 2m
+        labels:
+          severity: critical
+          gate: readiness
+        annotations:
+          summary: "Readiness gate failed for {{ $labels.service }}"
+          description: "{{ $labels.service }} no esta listo para recibir trafico."
+
+      - alert: AcademicoQualityGateLatencyFailed
+        expr: academico_quality_gate_latency_pass == 0
+        for: 5m
+        labels:
+          severity: warning
+          gate: latency
+        annotations:
+          summary: "Latency gate failed for {{ $labels.service }}"
+          description: "{{ $labels.service }} supera el limite de 750 ms en el health probe."
+
+      - alert: AcademicoQualityGateMetricsFailed
+        expr: academico_quality_gate_metrics_pass == 0
+        for: 10m
+        labels:
+          severity: warning
+          gate: metrics
+        annotations:
+          summary: "Metrics gate failed for {{ $labels.service }}"
+          description: "{{ $labels.service }} no expone /metrics o Prometheus no puede scrapearlo."
+
