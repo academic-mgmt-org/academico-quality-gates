@@ -14,7 +14,7 @@ services:
     image: prom/prometheus:v2.55.1
     container_name: academico-quality-gates-prometheus
     depends_on:
-      - blackbox-exporter
+      - quality-exporter
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -29,15 +29,19 @@ services:
       - prometheus-data:/prometheus
     restart: unless-stopped
 
-  blackbox-exporter:
-    image: prom/blackbox-exporter:v0.25.0
-    container_name: academico-quality-gates-blackbox
+  quality-exporter:
+    build:
+      context: ./exporter
+    container_name: academico-quality-gates-exporter
+    environment:
+      ACADEMICO_TARGET_HOST: host.docker.internal
+      EXPORTER_PORT: "9200"
+      LATENCY_THRESHOLD_SECONDS: "0.75"
+      PROBE_TIMEOUT_MS: "2500"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "9115:9115"
-    volumes:
-      - ./monitoring/prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+      - "9200:9200"
     restart: unless-stopped
 
   grafana:

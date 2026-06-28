@@ -92,7 +92,7 @@ async function loadService(service: CoreService): Promise<ServiceQualityState> {
   );
 
   const latencySeconds = await prometheus.scalar(
-    `probe_duration_seconds{job="core_http_health", service="${service.id}"}`,
+    `academico_core_probe_duration_seconds{gate="health", service="${service.id}"}`,
   );
 
   const hardGates = gates.filter((gate) => gate.definition.id !== 'metrics');
@@ -371,4 +371,3 @@ function serviceCard(serviceState: ServiceQualityState): string {
 render();
 void refresh();
 window.setInterval(() => void refresh(), 30000);
-

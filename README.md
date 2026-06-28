@@ -2,7 +2,7 @@
 
 Web de monitoreo para los quality gates de los servicios core assets del Sistema de Gestion Academica.
 
-El repositorio incluye una consola web, Prometheus, Blackbox Exporter y Grafana provisionado con datasource y dashboard inicial.
+El repositorio incluye una consola web, un exporter de probes HTTP/1.1 + HTTP/2 h2c, Prometheus y Grafana provisionado con datasource y dashboard inicial.
 
 ## Servicios monitoreados
 
@@ -29,7 +29,7 @@ URLs:
 - Web: http://localhost:8080
 - Grafana: http://localhost:3007
 - Prometheus: http://localhost:9090
-- Blackbox Exporter: http://localhost:9115
+- Quality Exporter: http://localhost:9200/metrics
 
 Credenciales locales de Grafana:
 
@@ -48,7 +48,7 @@ Con Prometheus levantado en `localhost:9090`, Vite redirige `/api/prometheus` ha
 
 ## Quality gates
 
-Los gates iniciales estan definidos en `monitoring/prometheus/rules/quality-gates.yml`:
+Los gates iniciales estan definidos en `monitoring/prometheus/rules/quality-gates.yml`. El exporter propio prueba primero HTTP/1.1 y despues HTTP/2 h2c, porque los microservicios NestJS actuales estan levantados con Fastify HTTP/2 cleartext.
 
 - `health`: el endpoint `/api/health` responde HTTP 2xx.
 - `readiness`: el endpoint `/api/ready` responde HTTP 2xx.
@@ -59,10 +59,10 @@ Los servicios actuales ya exponen health/readiness/liveness. El gate `metrics` q
 
 ## Configuracion de targets
 
-Prometheus usa `host.docker.internal` para probar servicios ejecutados en la maquina host. Si los servicios core se ejecutan en otra red o en Kubernetes, ajustar los targets en:
+El exporter usa `host.docker.internal` para probar servicios ejecutados en la maquina host. Si los servicios core se ejecutan en otra red o en Kubernetes, ajustar `ACADEMICO_TARGET_HOST` o la lista de servicios en:
 
 - `monitoring/prometheus/prometheus.yml`
+- `exporter/server.js`
 - `monitoring/prometheus/rules/quality-gates.yml`
 
 La documentacion del contrato de gates esta en `docs/quality-gates.md`.
-

@@ -229,7 +229,7 @@
             "uid": "Prometheus"
           },
           "editorMode": "code",
-          "expr": "probe_duration_seconds{job=\"core_http_health\"}",
+          "expr": "academico_core_probe_duration_seconds{gate=\"health\"}",
           "legendFormat": "{{service}}",
           "range": true,
           "refId": "A"
@@ -339,4 +339,3 @@
   "version": 1,
   "weekStart": ""
 }
-
